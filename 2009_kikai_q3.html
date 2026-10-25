@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>三相ブリッジ通電マップ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 回路図と「いま何が起きているか」を上段に並べ、その下に角度で揃えたタイミング図と通電表 */
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --fg:#1b2230; --muted:#5d6678; --rule:#d9dde5;
+  --wire:#3a4252; --off:#b8bfcc; --flow:#1f63d6; --flow-soft:#dce8fb;
+  --pa:#c43a30; --pb:#24874a; --pc:#7b4cc8;
+  --font-ui:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#12161d; --panel:#1a2029; --fg:#e6e9ef; --muted:#9aa3b4; --rule:#2e3644;
+  --wire:#aab2c2; --off:#4a5262; --flow:#6ea6ff; --flow-soft:#1e3352;
+  --pa:#ff7b70; --pb:#5fd08a; --pc:#b694ff; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12161d; --panel:#1a2029; --fg:#e6e9ef; --muted:#9aa3b4; --rule:#2e3644;
+  --wire:#aab2c2; --off:#4a5262; --flow:#6ea6ff; --flow-soft:#1e3352;
+  --pa:#ff7b70; --pb:#5fd08a; --pc:#b694ff; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);line-height:1.7;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-size:1.6rem;margin:0;text-wrap:balance;letter-spacing:.02em}
+.lede{margin:0;color:var(--muted);max-width:68ch}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.top{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+@media (max-width:760px){.top{grid-template-columns:minmax(0,1fr)}}
+.scroll{overflow-x:auto}
+svg text{font-family:var(--font-ui);fill:var(--fg)}
+svg .num{font-family:var(--font-num)}
+.status h2,.panel h2{font-size:1rem;margin:0 0 8px;letter-spacing:.04em}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.chip{font-family:var(--font-num);font-size:.95rem;padding:2px 10px;border-radius:999px;background:var(--flow-soft);color:var(--flow);font-weight:500}
+.route{margin:0 0 10px}
+.cur{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-family:var(--font-num);margin:0 0 10px}
+.cur dt{font-weight:500}
+.cur dd{margin:0}
+.next{font-size:.92rem;color:var(--muted);margin:0}
+.controls{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center}
+.controls label{display:flex;align-items:center;gap:10px;font-size:.95rem}
+.controls input[type=range]{width:min(260px,52vw);accent-color:var(--flow)}
+.val{font-family:var(--font-num);min-width:4.5em;display:inline-block}
+button{font:inherit;border:1px solid var(--rule);background:var(--panel);color:var(--fg);border-radius:8px;padding:4px 14px;cursor:pointer}
+button:hover{border-color:var(--flow)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--flow);outline-offset:2px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--rule);padding:6px 10px;text-align:left;font-size:.93rem}
+th{color:var(--muted);font-weight:500}
+td.n{font-family:var(--font-num)}
+tr.now td{background:var(--flow-soft)}
+.pa{color:var(--pa)} .pb{color:var(--pb)} .pc{color:var(--pc)}
+.points{display:grid;gap:8px;margin:0;padding-left:1.3em}
+.points li{max-width:72ch}
+.flowline{stroke-dasharray:10 8;animation:run .7s linear infinite}
+@keyframes run{to{stroke-dashoffset:-18}}
+@media (prefers-reduced-motion:reduce){.flowline{animation:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>三相ブリッジ通電マップ</h1>
+    <p class="lede">電源側サイリスタ変換器（2009年 機械・制御 問3 の図1 の左側）で、どのサイリスタが ON になり、電流がどこを通るかを角度ごとに表示します。直流電流 I<sub>d</sub> は一定で、サイリスタがそれを a・b・c の3本の電線に順番に振り分けます。</p>
+  </header>
+
+  <section class="panel controls" aria-label="操作">
+    <button id="play" type="button">▶ 再生</button>
+    <button id="prev" type="button">◀ 前の区間</button>
+    <button id="next" type="button">次の区間 ▶</button>
+    <label for="theta">電源の位相 θ <input id="theta" type="range" min="0" max="359" step="1" value="75"><span class="val" id="thetaV"></span></label>
+    <label for="alpha">制御遅れ角 α <input id="alpha" type="range" min="0" max="150" step="1" value="30"><span class="val" id="alphaV"></span></label>
+  </section>
+
+  <div class="top">
+    <section class="panel scroll" aria-label="回路図">
+      <svg id="circ" viewBox="0 0 720 400" width="100%" style="min-width:520px;display:block" role="img" aria-label="電源側三相ブリッジの回路と電流の通り道"></svg>
+    </section>
+    <section class="panel status" aria-live="polite">
+      <h2>いまの状態</h2>
+      <div class="chips" id="chips"></div>
+      <p class="route" id="route"></p>
+      <dl class="cur" id="cur"></dl>
+      <p class="next" id="nextEv"></p>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>タイミング図（横軸は電源の位相 θ、クリックで移動）</h2>
+    <div class="scroll">
+      <svg id="chart" viewBox="0 0 760 470" width="100%" style="min-width:600px;display:block;cursor:pointer" role="img" aria-label="相電圧、サイリスタのON期間、線電流のタイミング図"></svg>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>6つの区間（60°ごとに切り替わる）</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>区間（θ）</th><th>ON のサイリスタ</th><th>電流の通り道</th><th>i<sub>a</sub></th><th>i<sub>b</sub></th><th>i<sub>c</sub></th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>ここから分かること</h2>
+    <ol class="points">
+      <li>ON になっているサイリスタは、いつも上側1個と下側1個の合計2個です。電流は「上側がつながっている相」から出て、「下側がつながっている相」へ戻ります。</li>
+      <li>各サイリスタは 120° ずつ ON になります。たとえば a相の電線には、T1 が ON の120°は +I<sub>d</sub>、T4 が ON の120°は −I<sub>d</sub> が流れ、残りの 60°＋60° は 0 です。</li>
+      <li>1周期 360° のうち電流が流れているのは 240° なので、線電流の実効値は I<sub>1</sub> = √(240/360)·I<sub>d</sub> = √(2/3)·I<sub>d</sub> ≈ 0.816·I<sub>d</sub> になります。</li>
+      <li>α を大きくすると、ON になるタイミングが全体に右（遅れ側）へずれます。電流が電圧より遅れるので、電源側の力率は cos α の分だけ下がります。</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+(function(){
+  const NS="http://www.w3.org/2000/svg";
+  const $=id=>document.getElementById(id);
+  const el=(tag,attrs,parent,text)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;};
+  const mod=x=>((x%360)+360)%360;
+
+  // サイリスタ: 番号は点弧順。phase と上下
+  const TH={1:{ph:"a",up:true},2:{ph:"c",up:false},3:{ph:"b",up:true},4:{ph:"a",up:false},5:{ph:"c",up:true},6:{ph:"b",up:false}};
+  // 区間 k (0..5): 上側, 下側
+  const MODES=[[1,6],[1,2],[3,2],[3,4],[5,4],[5,6]];
+  const PH={a:{c:"var(--pa)",x:250,y:150,sy:150},b:{c:"var(--pb)",x:340,y:200,sy:200},c:{c:"var(--pc)",x:430,y:250,sy:250}};
+  const TOP=50,BOT=350,LOADX=640;
+
+  let theta=75, alpha=30, playing=false, last=null;
+
+  // ---------- 回路図 ----------
+  const circ=$("circ");
+  const gBase=el("g",{},circ), gFlow=el("g",{},circ), gTop=el("g",{},circ), gLoad=el("g",{},circ);
+  const W={stroke:"var(--wire)","stroke-width":2,fill:"none"};
+  // 電源
+  el("line",{x1:22,y1:150,x2:22,y2:250,...W},gBase);
+  el("text",{x:8,y:140,"font-size":13,fill:"var(--muted)"},gBase,"中性点");
+  ["a","b","c"].forEach(p=>{
+    const P=PH[p];
+    el("line",{x1:22,y1:P.y,x2:40,y2:P.y,...W},gBase);
+    el("circle",{cx:56,cy:P.y,r:16,stroke:P.c,"stroke-width":2,fill:"var(--panel)"},gBase);
+    el("text",{x:56,y:P.y+5,"text-anchor":"middle","font-size":15,fill:P.c},gBase,"~");
+    el("text",{x:56,y:P.y-22,"text-anchor":"middle","font-size":13,fill:P.c},gBase,p+"相");
+    el("line",{x1:72,y1:P.y,x2:P.x,y2:P.y,...W},gBase);
+    el("circle",{cx:P.x,cy:P.y,r:4,fill:"var(--wire)"},gBase);
+    el("line",{x1:P.x,y1:TOP,x2:P.x,y2:BOT,...W},gBase);
+  });
+  // 直流母線・リアクトル・負荷
+  el("line",{x1:250,y1:TOP,x2:500,y2:TOP,...W},gBase);
+  el("path",{d:"M500,"+TOP+" a10,10 0 0 1 20,0 a10,10 0 0 1 20,0 a10,10 0 0 1 20,0 a10,10 0 0 1 20,0",...W},gBase);
+  el("line",{x1:580,y1:TOP,x2:LOADX,y2:TOP,...W},gBase);
+  el("text",{x:540,y:TOP-14,"text-anchor":"middle","font-size":13,fill:"var(--muted)"},gBase,"直流リアクトル");
+  el("line",{x1:LOADX,y1:TOP,x2:LOADX,y2:130,...W},gBase);
+  el("rect",{x:LOADX-62,y:130,width:124,height:140,rx:6,stroke:"var(--wire)","stroke-width":2,fill:"var(--panel)"},gLoad);
+  el("text",{x:LOADX,y:182,"text-anchor":"middle","font-size":13},gLoad,"負荷側変換器");
+  el("text",{x:LOADX,y:202,"text-anchor":"middle","font-size":13},gLoad,"＋");
+  el("text",{x:LOADX,y:222,"text-anchor":"middle","font-size":13},gLoad,"同期電動機");
+  el("line",{x1:LOADX,y1:270,x2:LOADX,y2:BOT,...W},gBase);
+  el("line",{x1:250,y1:BOT,x2:LOADX,y2:BOT,...W},gBase);
+  el("text",{x:340,y:BOT+36,"text-anchor":"middle","font-size":13,fill:"var(--muted)"},gBase,"電源側サイリスタ変換器");
+  // サイリスタ記号
+  const thG={};
+  for(const n in TH){
+    const t=TH[n],P=PH[t.ph];
+    const cy=t.up?(TOP+P.y)/2:(P.y+BOT)/2, cx=P.x;
+    const g=el("g",{},gTop);
+    el("rect",{x:cx-14,y:cy-14,width:28,height:26,fill:"var(--panel)"},g);
+    const tri=el("path",{d:`M${cx-12},${cy+10} L${cx+12},${cy+10} L${cx},${cy-8} Z`,"stroke-width":2},g);
+    const bar=el("line",{x1:cx-13,y1:cy-9,x2:cx+13,y2:cy-9,"stroke-width":2.5},g);
+    const gate=el("path",{d:`M${cx+6},${cy-4} L${cx+16},${cy-14} L${cx+24},${cy-14}`,"stroke-width":1.6,fill:"none"},g);
+    const lab=el("text",{x:cx-20,y:cy+5,"text-anchor":"end","font-size":14,"font-weight":700,class:"num"},g,"T"+n);
+    thG[n]={tri,bar,gate,lab};
+  }
+  // 電流ラベル
+  const curLab={};
+  ["a","b","c"].forEach(p=>{curLab[p]=el("text",{x:160,y:PH[p].y-8,"text-anchor":"middle","font-size":13,class:"num"},gTop,"");});
+  const flowPath=el("polyline",{fill:"none",stroke:"var(--flow)","stroke-width":5,"stroke-linejoin":"round",class:"flowline",opacity:.9},gFlow);
+  const flowBack=el("polyline",{fill:"none",stroke:"var(--flow)","stroke-width":5,"stroke-linejoin":"round",opacity:.25},gFlow);
+  const idLab=el("text",{x:440,y:TOP+24,"text-anchor":"middle","font-size":14,"font-weight":700,fill:"var(--flow)",class:"num"},gTop,"Id →");
+
+  // ---------- タイミング図 ----------
+  const chart=$("chart");
+  const X0=90,X1=740,xs=d=>X0+(X1-X0)*d/360;
+  const VY=70,VA=48; // 電圧行
+  const thRows=[1,4,3,6,5,2]; const TY0=150,TH_H=22;
+  const IY0=300,IH=48;
+  const cBase=el("g",{},chart), cDyn=el("g",{},chart), cCur=el("g",{},chart);
+  // 軸と目盛
+  for(let d=0;d<=360;d+=30){
+    el("line",{x1:xs(d),y1:16,x2:xs(d),y2:IY0+3*IH-10,stroke:"var(--rule)","stroke-width":d%90?0.6:1},cBase);
+    if(d%60===0) el("text",{x:xs(d),y:462,"text-anchor":"middle","font-size":12,class:"num",fill:"var(--muted)"},cBase,d+"°");
+  }
+  el("text",{x:8,y:VY+4,"font-size":13},cBase,"相電圧");
+  el("line",{x1:X0,y1:VY,x2:X1,y2:VY,stroke:"var(--muted)","stroke-width":.8},cBase);
+  [["a",0],["b",120],["c",240]].forEach(([p,sh])=>{
+    let d="";for(let t=0;t<=360;t+=2){d+=(t?"L":"M")+xs(t).toFixed(1)+","+(VY-VA*Math.sin((t-sh)*Math.PI/180)).toFixed(1);}
+    el("path",{d,stroke:PH[p].c,"stroke-width":1.8,fill:"none"},cBase);
+  });
+  el("text",{x:X1-4,y:22,"text-anchor":"end","font-size":12,fill:"var(--muted)"},cBase,"▲ 点弧（α だけ遅らせる）");
+  thRows.forEach((n,i)=>{
+    const y=TY0+i*TH_H, t=TH[n];
+    el("text",{x:8,y:y+15,"font-size":13,class:"num",fill:PH[t.ph].c},cBase,"T"+n);
+    el("text",{x:38,y:y+15,"font-size":11,fill:"var(--muted)"},cBase,t.ph+"相"+(t.up?"上":"下"));
+  });
+  ["a","b","c"].forEach((p,i)=>{
+    const y=IY0+i*IH+IH/2;
+    el("text",{x:8,y:y+4,"font-size":13,class:"num",fill:PH[p].c},cBase,"i"+p);
+    el("line",{x1:X0,y1:y,x2:X1,y2:y,stroke:"var(--muted)","stroke-width":.6},cBase);
+    el("text",{x:X0-6,y:y-12,"text-anchor":"end","font-size":10,class:"num",fill:"var(--muted)"},cBase,"+Id");
+    el("text",{x:X0-6,y:y+20,"text-anchor":"end","font-size":10,class:"num",fill:"var(--muted)"},cBase,"−Id");
+  });
+  const cursor=el("line",{y1:12,y2:IY0+3*IH-6,stroke:"var(--flow)","stroke-width":2},cCur);
+  const cursorLab=el("text",{y:12,"text-anchor":"middle","font-size":11,class:"num",fill:"var(--flow)"},cCur,"");
+
+  function onInterval(n,deg){ // T n の ON 区間開始
+    const k=n-1; const s=mod(30+alpha+60*k); return mod(deg-s)<120;
+  }
+  function seg(s,len,cb){ // [s, s+len) を 0..360 で分割
+    s=mod(s); if(s+len<=360){cb(s,s+len);} else {cb(s,360);cb(0,s+len-360);}
+  }
+  function drawDyn(){
+    cDyn.textContent="";
+    // 点弧マーク
+    for(let k=0;k<6;k++){
+      const d=mod(30+alpha+60*k), n=k+1;
+      el("path",{d:`M${xs(d)},${VY+VA+14} l-5,8 l10,0 z`,fill:PH[TH[n].ph].c},cDyn);
+      el("text",{x:xs(d),y:VY+VA+34,"text-anchor":"middle","font-size":10,class:"num",fill:PH[TH[n].ph].c},cDyn,"T"+n);
+    }
+    thRows.forEach((n,i)=>{
+      const y=TY0+i*TH_H+3;
+      seg(30+alpha+60*(n-1),120,(a,b)=>el("rect",{x:xs(a),y,width:xs(b)-xs(a),height:TH_H-8,rx:3,fill:PH[TH[n].ph].c,opacity:.8},cDyn));
+    });
+    const pairs={a:[1,4],b:[3,6],c:[5,2]};
+    ["a","b","c"].forEach((p,i)=>{
+      const y0=IY0+i*IH+IH/2; let d="";
+      for(let t=0;t<=360;t+=0.5){
+        const v=onInterval(pairs[p][0],t)?1:onInterval(pairs[p][1],t)?-1:0;
+        d+=(t?"L":"M")+xs(t).toFixed(1)+","+(y0-v*(IH/2-6)).toFixed(1);
+      }
+      el("path",{d,stroke:PH[p].c,"stroke-width":2.2,fill:"none"},cDyn);
+    });
+  }
+
+  // ---------- 表 ----------
+  const names={a:"a相",b:"b相",c:"c相"};
+  function modeOf(th){return Math.floor(mod(th-30-alpha)/60);}
+  function iv(p,k){const [u,l]=MODES[k];return TH[u].ph===p?"+Id":TH[l].ph===p?"−Id":"0";}
+  function drawTable(k){
+    const tb=$("tbody"); tb.textContent="";
+    MODES.forEach(([u,l],i)=>{
+      const s=mod(30+alpha+60*i), e=mod(s+60);
+      const tr=document.createElement("tr"); if(i===k) tr.className="now";
+      const cells=[`${s}°〜${e===0?360:e}°`,`T${u}・T${l}`,`${names[TH[u].ph]} → T${u} → 負荷 → T${l} → ${names[TH[l].ph]}`,iv("a",i),iv("b",i),iv("c",i)];
+      cells.forEach((c,j)=>{const td=document.createElement("td");td.textContent=c;if(j!==2)td.className="n";if(j>=3)td.classList.add("p"+"abc"[j-3]);tr.appendChild(td);});
+      tb.appendChild(tr);
+    });
+  }
+
+  let lastK=-1,lastAlpha=-1;
+  function render(){
+    const k=modeOf(theta), [u,l]=MODES[k];
+    if(alpha!==lastAlpha){drawDyn();lastAlpha=alpha;lastK=-1;}
+    if(k!==lastK){
+      drawTable(k); lastK=k;
+      for(const n in thG){
+        const on=(+n===u||+n===l), c=on?"var(--flow)":"var(--off)";
+        const g=thG[n]; g.tri.setAttribute("fill",on?"var(--flow)":"var(--panel)"); g.tri.setAttribute("stroke",c);
+        g.bar.setAttribute("stroke",c); g.gate.setAttribute("stroke",c); g.lab.setAttribute("fill",on?"var(--flow)":"var(--muted)");
+      }
+      const U=PH[TH[u].ph], L=PH[TH[l].ph];
+      flowPath.setAttribute("points",[[72,U.y],[U.x,U.y],[U.x,TOP],[LOADX,TOP],[LOADX,130]].concat([[LOADX,270],[LOADX,BOT],[L.x,BOT],[L.x,L.y],[72,L.y]]).map(p=>p.join(",")).join(" "));
+      flowBack.setAttribute("points",[[40,L.y],[22,L.y],[22,U.y],[40,U.y]].map(p=>p.join(",")).join(" "));
+      ["a","b","c"].forEach(p=>{const v=iv(p,k);curLab[p].textContent="i"+p+" = "+v;curLab[p].setAttribute("fill",v==="0"?"var(--muted)":PH[p].c);});
+      $("chips").innerHTML=`<span class="chip">T${u} ON（${names[TH[u].ph]}・上）</span><span class="chip">T${l} ON（${names[TH[l].ph]}・下）</span>`;
+      $("route").textContent=`電流は ${names[TH[u].ph]} → T${u} → 上の直流線 → 直流リアクトル → 負荷 → 下の直流線 → T${l} → ${names[TH[l].ph]} と流れています。残りの4個は OFF です。`;
+      $("cur").innerHTML=["a","b","c"].map(p=>{const v=iv(p,k);return `<dt class="p${p}">i${p}</dt><dd>${v==="0"?"0（この電線は休み）":v==="+Id"?"+Id（電源から変換器へ）":"−Id（変換器から電源へ戻る）"}</dd>`;}).join("");
+      const nk=(k+1)%6, nn=nk+1, ns=mod(30+alpha+60*nk);
+      const off=MODES[k].find(x=>!MODES[nk].includes(x));
+      $("nextEv").textContent=`次は θ = ${ns}° で T${nn} を点弧します。T${nn} が ON になると T${off} から電流が移り、T${off} は OFF になります（転流）。`;
+    }
+    cursor.setAttribute("x1",xs(theta));cursor.setAttribute("x2",xs(theta));
+    cursorLab.setAttribute("x",Math.min(Math.max(xs(theta),X0+16),X1-16));cursorLab.textContent=Math.round(theta)+"°";
+    $("theta").value=Math.round(theta)%360; $("thetaV").textContent=Math.round(theta)%360+"°"; $("alphaV").textContent=alpha+"°";
+  }
+
+  function tick(ts){
+    if(!playing){last=null;return;}
+    if(last!=null) theta=mod(theta+(ts-last)*0.03);
+    last=ts; render(); requestAnimationFrame(tick);
+  }
+  $("play").addEventListener("click",()=>{playing=!playing;$("play").textContent=playing?"❚❚ 一時停止":"▶ 再生";if(playing)requestAnimationFrame(tick);});
+  const jump=dir=>{playing=false;$("play").textContent="▶ 再生";const k=modeOf(theta);theta=mod(30+alpha+60*(k+dir)+30);render();};
+  $("prev").addEventListener("click",()=>jump(-1));
+  $("next").addEventListener("click",()=>jump(1));
+  $("theta").addEventListener("input",e=>{theta=+e.target.value;render();});
+  $("alpha").addEventListener("input",e=>{alpha=+e.target.value;render();});
+  chart.addEventListener("click",e=>{
+    const pt=chart.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;
+    const p=pt.matrixTransform(chart.getScreenCTM().inverse());
+    if(p.x>=X0&&p.x<=X1){theta=Math.round((p.x-X0)/(X1-X0)*360)%360;render();}
+  });
+  render();
+})();
+</script>
+
+</body>
+</html>
